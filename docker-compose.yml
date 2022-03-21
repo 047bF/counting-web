@@ -1,0 +1,21 @@
+version: '3'
+services:
+  py_app:
+    build: .
+    volumes:
+      - ./code:/code
+    ports:
+      - 8000:8000
+
+  redis:
+    image: redis:latest
+    command: redis-server --appendonly yes
+    ports:
+      - 6380:6379
+    hostname: redis_host
+    volumes:
+      - ./redis_data:/data
+      - $PWD/redis-data:/var/lib/redis
+      - $PWD/redis.conf:/usr/local/etc/redis/redis.conf
+    environment:
+      - REDIS_REPLICATION_MODE=master
