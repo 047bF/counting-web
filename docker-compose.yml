@@ -1,4 +1,4 @@
-version: '3'
+version: '3.7'
 services:
   py_app:
     build: .
@@ -6,6 +6,10 @@ services:
       - ./code:/code
     ports:
       - 8000:8000
+    depends_on:
+      - redis
+    networks:
+      - app-network
 
   redis:
     image: redis:latest
@@ -19,3 +23,9 @@ services:
       - $PWD/redis.conf:/usr/local/etc/redis/redis.conf
     environment:
       - REDIS_REPLICATION_MODE=master
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge

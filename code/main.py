@@ -1,15 +1,21 @@
 from optparse import OptionParser
-import requests
 import string
 import itertools
 import redis
 import datetime
+import asyncio
+import aiohttp
+import traceback
+
 
 # Press ⌃R to execute it or replace it with your code.
 # Press Double ⇧ to search everywhere for classes, files, tool windows, actions, and settings.
 redis = redis.Redis(
-     host='localhost',
-     port='6380')
+     # host='172.21.0.2',
+     # host='localhost',
+     host='howmanyhost_redis_1',
+     port='6379')
+     # port='6380')
 protos = ['https://', 'http://']
 headers = {'user-agent': 'python-requests/2.6.2 CPython/3.4.3 Windows/8'}
 
@@ -20,15 +26,8 @@ def generate_names(count):
         yield "".join(item)
 
 
-def get_status(proto, site_name, zone):
-    web_url = proto + site_name + zone
-    try:
-        request = requests.get(web_url, headers=headers, stream=True, timeout=(10, 30))
-        if request.status_code < 400:
-            print('Web site exists: %s' % web_url)
-            return request
-    except:
-        return None
+def get_last_key():
+    return str(redis.hget('h_last_key', 'url'), 'cp1252')
 
 
 def is_last_key(some_key):
@@ -70,6 +69,65 @@ def parse_arg():
     return options_arr
 
 
+async def par_run(in_params):
+    checked = False
+    start_key = get_last_key()
+    work_queue = asyncio.Queue()
+    for n in range(len(start_key), in_params.count):
+        new_names = generate_names(n)
+        print('Generated names with %s letters' % n)
+        for site in new_names:
+            if not checked:
+                if is_last_key(site):
+                    checked = True
+                continue
+            else:
+                await work_queue.put(site)
+
+        await asyncio.gather(
+            asyncio.create_task(check_site("one", in_params, work_queue)),
+            asyncio.create_task(check_site("two", in_params, work_queue)),
+            asyncio.create_task(check_site("thr", in_params, work_queue)),
+            asyncio.create_task(check_site("fou", in_params, work_queue)),
+            asyncio.create_task(check_site("fiv", in_params, work_queue)),
+            asyncio.create_task(check_site("six", in_params, work_queue)),
+        )
+
+
+async def check_site(name, in_params, queue):
+    timeout = aiohttp.ClientTimeout(total=20)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        while not queue.empty():
+            site = await queue.get()
+            set_last_key(site)
+            for proto in protos:
+                response = await get_status(name, session, proto, site, in_params.zone)
+                if response:
+                    insert_db(site + in_params.zone, proto, response)
+                    break
+
+
+async def get_status(task_name, session, proto, site_name, zone):
+    web_url = proto + site_name + zone
+    try:
+        async with session.get(web_url, headers=headers) as response:
+            a_response = await response.text()
+            if response.status < 400:
+                print('Task %s web site exists: %s' % (task_name, web_url))
+                return a_response
+    except aiohttp.ClientConnectorError as e:
+        None
+    except aiohttp.ClientOSError as e:
+        None
+    except asyncio.TimeoutError as e:
+        None
+    except aiohttp.ServerDisconnectedError as e:
+        None
+    except:
+        print('ERROR GET URL: ', web_url)
+        print(traceback.print_exc())
+
+
 # Press the green button in the gutter to run the script.  ConnectionError
 if __name__ == '__main__':
     options = parse_arg()
@@ -81,21 +139,8 @@ if __name__ == '__main__':
         print('Exit 82')
         exit()
 
-    checked = False
-    for n in range(2, int(options.count)):
-        new_names = generate_names(n)
-        print('Generated names with %s letters' % n)
-        for site in new_names:
-            if not checked:
-                if is_last_key(site):
-                    checked = True
-                continue
-            set_last_key(site)
-            for proto in protos:
-                response = get_status(proto, site, options.zone)
-                if response:
-                    insert_db(site + options.zone, proto, response)
-                    break
+    asyncio.run(par_run(options))
+
 
 
 # See PyCharm help at https://www.jetbrains.com/help/pycharm/
